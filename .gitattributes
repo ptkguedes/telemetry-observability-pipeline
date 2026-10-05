@@ -1,0 +1,7 @@
+# Normaliza as quebras de linha: LF no repositorio, nativo na copia local.
+* text=auto eol=lf
+
+# Arquivos sempre binarios.
+*.db binary
+*.png binary
+*.jpg binary

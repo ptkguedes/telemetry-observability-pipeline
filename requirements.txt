@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# Pipeline de Observabilidade e Telemetria em Tempo Real
+# Dependencias fixadas (pinned) para builds reprodutiveis - Python 3.11+
+# Versoes validadas em Python 3.14 (compativeis com 3.11+).
+# ---------------------------------------------------------------------------
+
+# --- API / Web ---
+fastapi==0.141.1
+uvicorn==0.54.0
+pydantic==2.13.5
+
+# --- Dashboard / Visualizacao ---
+# Requer Streamlit >= 1.48 por causa do parametro `width="stretch"`.
+streamlit==1.64.0
+plotly==7.1.0
+
+# --- Manipulacao de dados e cliente HTTP ---
+pandas==3.0.6
+requests==2.34.2
+
+# --- Testes ---
+pytest==9.1.1
+httpx==0.28.1  # requerido pelo fastapi.testclient.TestClient
