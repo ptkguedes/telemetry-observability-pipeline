@@ -261,7 +261,11 @@ def insert_log(
 
     try:
         with get_connection() as connection:
-            cursor = connection.execute(
+            # Cursor explicito (em vez do atalho `connection.execute`): e o
+            # `cursor()` que a instrumentacao DBAPI do OpenTelemetry embrulha,
+            # portanto so por aqui o SQL aparece como span no Jaeger.
+            cursor = connection.cursor()
+            cursor.execute(
                 sql,
                 (
                     event_timestamp,
@@ -306,7 +310,10 @@ def fetch_recent_logs(limit: int = 50) -> list[dict[str, Any]]:
 
     try:
         with get_connection() as connection:
-            rows = connection.execute(sql, (limit_value,)).fetchall()
+            # Cursor explicito: requisito da instrumentacao DBAPI (ver insert_log).
+            cursor = connection.cursor()
+            cursor.execute(sql, (limit_value,))
+            rows = cursor.fetchall()
             return [dict(row) for row in rows]
     except DatabaseError:
         logger.error("Falha ao consultar os ultimos %s registros.", limit_value)
@@ -347,7 +354,10 @@ def fetch_summary(minutes: int = 5) -> dict[str, Any]:
 
     try:
         with get_connection() as connection:
-            row = connection.execute(sql, (f"-{window} minutes",)).fetchone()
+            # Cursor explicito: requisito da instrumentacao DBAPI (ver insert_log).
+            cursor = connection.cursor()
+            cursor.execute(sql, (f"-{window} minutes",))
+            row = cursor.fetchone()
     except DatabaseError:
         logger.error("Falha ao agregar metricas dos ultimos %s minutos.", window)
         raise
@@ -395,7 +405,10 @@ def fetch_alerts(limit: int = 20) -> list[dict[str, Any]]:
 
     try:
         with get_connection() as connection:
-            rows = connection.execute(sql, (limit_value,)).fetchall()
+            # Cursor explicito: requisito da instrumentacao DBAPI (ver insert_log).
+            cursor = connection.cursor()
+            cursor.execute(sql, (limit_value,))
+            rows = cursor.fetchall()
             return [dict(row) for row in rows]
     except DatabaseError:
         logger.error("Falha ao consultar alertas de erro.")
@@ -413,7 +426,10 @@ def count_logs() -> int:
     """
     try:
         with get_connection() as connection:
-            row = connection.execute(f"SELECT COUNT(*) AS total FROM {TABLE_NAME}").fetchone()
+            # Cursor explicito: requisito da instrumentacao DBAPI (ver insert_log).
+            cursor = connection.cursor()
+            cursor.execute(f"SELECT COUNT(*) AS total FROM {TABLE_NAME}")
+            row = cursor.fetchone()
             return int(row["total"] or 0)
     except DatabaseError:
         logger.error("Falha ao contar registros de telemetria.")
@@ -439,6 +455,9 @@ def check_health() -> dict[str, Any]:
 
     try:
         with get_connection() as connection:
+            # Aqui o atalho `connection.execute` e mantido de proposito: sem
+            # cursor explicito a instrumentacao DBAPI nao traca estas consultas,
+            # e o /health e chamado a cada rerun do dashboard - nao vale o ruido.
             connection.execute("SELECT 1;").fetchone()
             report["database_connected"] = True
 

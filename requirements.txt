@@ -18,6 +18,16 @@ plotly==7.1.0
 pandas==3.0.6
 requests==2.34.2
 
+# --- Tracing distribuido (OpenTelemetry -> Jaeger via OTLP) ---
+# SDK e exporter OTLP/gRPC (porta 4317), que e o caminho usado pelo projeto.
+opentelemetry-sdk==1.45.0
+opentelemetry-exporter-otlp-proto-grpc==1.45.0
+
+# Instrumentacoes automaticas (versionadas em 0.xxbN, fora do ciclo do SDK).
+opentelemetry-instrumentation-fastapi==0.66b0
+opentelemetry-instrumentation-sqlite3==0.66b0
+opentelemetry-instrumentation-requests==0.66b0
+
 # --- Testes ---
 pytest==9.1.1
 httpx==0.28.1  # requerido pelo fastapi.testclient.TestClient

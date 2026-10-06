@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 if __package__ in (None, ""):  # pragma: no cover - conveniencia de execucao
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import database  # noqa: E402  (import apos ajuste de sys.path)
+from app import database, tracing  # noqa: E402  (import apos ajuste de sys.path)
 
 logger = logging.getLogger("api")
 
@@ -111,6 +111,22 @@ app = FastAPI(
     contact={"name": "Plataforma de Observabilidade"},
     license_info={"name": "MIT"},
 )
+
+# ---------------------------------------------------------------------------
+# Tracing distribuido (OpenTelemetry -> Jaeger)
+# ---------------------------------------------------------------------------
+# Configurado no nivel do modulo, imediatamente apos a criacao do `app`, para
+# que o stack de middleware ja nasca instrumentado - inclusive quando o
+# `uvicorn --reload` reimporta este arquivo. As funcoes de `app.tracing` sao
+# idempotentes e no-op com o kill switch ligado, portanto reimportar e seguro.
+tracing.configure_tracing("telemetry-api")
+tracing.instrument_sqlite3()
+tracing.instrument_fastapi_app(app)
+
+if tracing.is_configured():
+    logger.info("Tracing distribuido ativo em %s", tracing.otlp_endpoint())
+else:
+    logger.info("Tracing distribuido desativado (kill switch ou falha de setup).")
 
 
 # ---------------------------------------------------------------------------

@@ -28,12 +28,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import FrameType
 
+from opentelemetry.trace import Status, StatusCode
+
 # Permite executar tanto como modulo (`python -m app.producer`) quanto como
 # script direto (`python app/producer.py`).
 if __package__ in (None, ""):  # pragma: no cover - conveniencia de execucao
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app import database  # noqa: E402  (import apos ajuste de sys.path)
+from app import database, tracing  # noqa: E402  (import apos ajuste de sys.path)
 
 logger = logging.getLogger("producer")
 
@@ -163,6 +165,8 @@ def run(
     """
     database.init_db()
     stats = ProducerStats()
+    # Sem provider configurado este tracer e no-op: o loop nao muda de forma.
+    tracer = tracing.get_tracer("app.producer")
 
     limite = "infinito" if max_events <= 0 else str(max_events)
     logger.info(
@@ -180,19 +184,45 @@ def run(
                 if 0 < max_events <= stats.total:
                     break
 
-                event = generate_event()
-                try:
-                    event_id = database.insert_log(
-                        service_name=str(event["service_name"]),
-                        latency_ms=float(event["latency_ms"]),  # type: ignore[arg-type]
-                        status_code=int(event["status_code"]),  # type: ignore[arg-type]
-                        error_flag=int(event["error_flag"]),  # type: ignore[arg-type]
+                # Um span por evento (nao por ciclo): os atributos pedidos sao
+                # do evento sintetico e, com `--batch N`, ficam N spans irmaos,
+                # cada um com o INSERT do SQLite como filho.
+                with tracer.start_as_current_span("producer.gerar_evento") as span:
+                    event = generate_event()
+                    span.set_attribute(
+                        tracing.ATTR_SERVICE_NAME, str(event["service_name"])
                     )
-                except (database.DatabaseError, ValueError) as exc:
-                    # Falha de escrita nao derruba o producer: registra e segue.
-                    stats.failed_writes += 1
-                    logger.warning("Evento descartado (%s): %s", type(exc).__name__, exc)
-                    continue
+                    span.set_attribute(
+                        tracing.ATTR_LATENCY_MS,
+                        float(event["latency_ms"]),  # type: ignore[arg-type]
+                    )
+                    span.set_attribute(
+                        tracing.ATTR_STATUS_CODE,
+                        int(event["status_code"]),  # type: ignore[arg-type]
+                    )
+                    span.set_attribute(
+                        tracing.ATTR_ERROR_FLAG,
+                        int(event["error_flag"]),  # type: ignore[arg-type]
+                    )
+
+                    try:
+                        event_id = database.insert_log(
+                            service_name=str(event["service_name"]),
+                            latency_ms=float(event["latency_ms"]),  # type: ignore[arg-type]
+                            status_code=int(event["status_code"]),  # type: ignore[arg-type]
+                            error_flag=int(event["error_flag"]),  # type: ignore[arg-type]
+                        )
+                    except (database.DatabaseError, ValueError) as exc:
+                        # Falha de escrita nao derruba o producer: registra e segue.
+                        stats.failed_writes += 1
+                        span.record_exception(exc)
+                        span.set_status(
+                            Status(StatusCode.ERROR, f"Evento descartado: {exc}")
+                        )
+                        logger.warning("Evento descartado (%s): %s", type(exc).__name__, exc)
+                        continue
+
+                    span.set_attribute(tracing.ATTR_EVENT_ID, event_id)
 
                 stats.total += 1
                 stats.errors += int(event["error_flag"])  # type: ignore[arg-type]
@@ -218,6 +248,9 @@ def run(
     except database.DatabaseError as exc:
         logger.error("Erro fatal de banco de dados, abortando: %s", exc)
     finally:
+        # Flush antes do resumo: garante que os spans do ciclo cheguem ao
+        # Jaeger e mantem o resumo como ultima coisa impressa no terminal.
+        tracing.shutdown_tracing()
         _print_summary(stats)
 
     return stats
@@ -306,6 +339,11 @@ def main(argv: list[str] | None = None) -> int:
         random.seed(args.seed)
     if args.db:
         database.configure_database(args.db)
+
+    # Tracing antes do primeiro acesso ao banco: a instrumentacao do sqlite3 so
+    # alcanca as conexoes abertas depois dela.
+    tracing.configure_tracing("telemetry-producer")
+    tracing.instrument_sqlite3()
 
     # Em ambientes containerizados o orquestrador envia SIGTERM ao parar.
     try:
